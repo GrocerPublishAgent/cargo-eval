@@ -79,27 +79,28 @@ mod suppress_child_output {
         let mut child = cmd.spawn()?;
         let stderr = child.stderr.take().expect("no stderr pipe found");
 
-        let timeout_chan = chan::after(timeout);
-        let (done_sig, done_gate) = chan::sync(0);
+        let (done_sig, done_gate) = std::sync::mpsc::channel::<bool>();
 
         let _ = thread::spawn(move || {
             let show_stderr;
             let mut recv_done = false;
-            chan_select! {
-                timeout_chan.recv() => {
-                    show_stderr = true;
-                },
-                done_gate.recv() -> success => {
-                    show_stderr = !success.unwrap_or(true);
+            match done_gate.recv_timeout(timeout) {
+                Ok(success) => {
+                    show_stderr = !success;
                     recv_done = true;
                 },
+                Err(cause) => {
+                    debug_assert!(cause == std::sync::mpsc::RecvTimeoutError::Timeout);
+                    show_stderr = true;
+                }
             }
+
             if show_stderr {
                 let mut stderr = stderr;
                 io::copy(&mut stderr, &mut io::stderr()).expect("could not copy child stderr");
             }
             if !recv_done {
-                done_gate.recv();
+                let _ = done_gate.recv();
             }
         });
 
@@ -112,7 +113,7 @@ mod suppress_child_output {
 
     pub struct ChildToken {
         child: process::Child,
-        done_sig: Option<chan::Sender<bool>>,
+        done_sig: Option<std::sync::mpsc::Sender<bool>>,
         // stderr_join: Option<thread::JoinHandle<()>>,
     }
 
@@ -122,13 +123,13 @@ mod suppress_child_output {
                 Ok(r) => r,
                 Err(e) => {
                     if let Some(done_sig) = self.done_sig.take() {
-                        done_sig.send(false);
+                        done_sig.send(false).unwrap();
                     }
                     return Err(e);
                 }
             };
             if let Some(done_sig) = self.done_sig.take() {
-                done_sig.send(st.success());
+                done_sig.send(st.success()).unwrap();
             }
             // if let Some(stderr_join) = self.stderr_join.take() {
             //     stderr_join.join()

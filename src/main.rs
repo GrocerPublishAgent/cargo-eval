@@ -18,10 +18,6 @@ extern crate log;
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "chan")]
-#[macro_use]
-extern crate chan;
-
 /**
 If this is set to `true`, the digests used for package IDs will be replaced with "stub" to make testing a bit easier.  Obviously, you don't want this `true` for release...
 */
